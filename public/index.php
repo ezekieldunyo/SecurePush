@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SecurePush - Security Scanner</title>
     <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -20,14 +21,35 @@
             <!-- Upload Section -->
             <section id="upload-section" class="card">
                 <h2>Upload Project</h2>
-                <p class="instruction">Upload your project as a ZIP file for security scanning</p>
+                <p class="instruction">Upload your project as a ZIP file or folder for security scanning</p>
                 
                 <form id="upload-form" enctype="multipart/form-data">
                     <div class="form-group">
+                        <label>Upload Type</label>
+                        <div style="display: flex; gap: 20px; margin-bottom: 15px;">
+                            <label style="font-weight: normal; cursor: pointer;">
+                                <input type="radio" name="upload-type" value="zip" checked>
+                                ZIP File
+                            </label>
+                            <label style="font-weight: normal; cursor: pointer;">
+                                <input type="radio" name="upload-type" value="folder">
+                                Folder
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group" id="zip-upload-group">
                         <label for="project-file">Project ZIP File</label>
                         <input type="file" id="project-file" name="project" accept=".zip" required>
                         <small class="help-text">Maximum file size: 50MB</small>
                         <div id="selected-file-display" class="selected-file"></div>
+                    </div>
+                    
+                    <div class="form-group" id="folder-upload-group" style="display: none;">
+                        <label for="project-folder">Project Folder</label>
+                        <input type="file" id="project-folder" name="projectFolder" webkitdirectory multiple>
+                        <small class="help-text">Select a folder - contents will be compressed automatically</small>
+                        <div id="selected-folder-display" class="selected-file"></div>
                     </div>
                     
                     <div class="form-group">

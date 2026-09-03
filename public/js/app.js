@@ -17,10 +17,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const githubForm = document.getElementById('github-form');
     const fileInput = document.getElementById('project-file');
     const selectedFileDisplay = document.getElementById('selected-file-display');
+    const folderInput = document.getElementById('project-folder');
+    const selectedFolderDisplay = document.getElementById('selected-folder-display');
+    const zipUploadGroup = document.getElementById('zip-upload-group');
+    const folderUploadGroup = document.getElementById('folder-upload-group');
+    const uploadTypeRadios = document.querySelectorAll('input[name="upload-type"]');
     
     // State
     let currentScanData = null;
     let uploadedProjectData = null;
+    let currentUploadType = 'zip';
     
     // Notification System
     function showNotification(message, type = 'error', title = '') {
@@ -83,6 +89,35 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
     
+    // Upload Type Toggle Handler
+    uploadTypeRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            currentUploadType = this.value;
+            
+            if (currentUploadType === 'zip') {
+                zipUploadGroup.style.display = 'block';
+                folderUploadGroup.style.display = 'none';
+                fileInput.required = true;
+                folderInput.required = false;
+            } else {
+                zipUploadGroup.style.display = 'none';
+                folderUploadGroup.style.display = 'block';
+                fileInput.required = false;
+                folderInput.required = true;
+                
+                // Ensure webkitdirectory attribute is set for folder picker
+                folderInput.setAttribute('webkitdirectory', '');
+                folderInput.setAttribute('directory', '');
+            }
+            
+            // Clear selections
+            selectedFileDisplay.textContent = '';
+            selectedFileDisplay.classList.remove('visible');
+            selectedFolderDisplay.textContent = '';
+            selectedFolderDisplay.classList.remove('visible');
+        });
+    });
+    
     // File Selection Display
     fileInput.addEventListener('change', function() {
         if (this.files && this.files.length > 0) {
@@ -95,29 +130,76 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
+    // Folder Selection Display
+    folderInput.addEventListener('change', function() {
+        console.log('Folder input changed:', this.files);
+        console.log('Number of files:', this.files ? this.files.length : 0);
+        
+        if (this.files && this.files.length > 0) {
+            const fileCount = this.files.length;
+            selectedFolderDisplay.textContent = `Selected: ${fileCount} files from folder`;
+            selectedFolderDisplay.classList.add('visible');
+            
+            // Log first few files to verify folder structure
+            for (let i = 0; i < Math.min(3, this.files.length); i++) {
+                console.log(`File ${i}:`, this.files[i].name, this.files[i].webkitRelativePath);
+            }
+        } else {
+            selectedFolderDisplay.textContent = '';
+            selectedFolderDisplay.classList.remove('visible');
+        }
+    });
+    
     // Upload Form Handler
     uploadForm.addEventListener('submit', async function(e) {
         e.preventDefault();
         
         const projectName = document.getElementById('project-name').value;
+        let fileToUpload = null;
         
-        if (!fileInput.files || fileInput.files.length === 0) {
-            showNotification('Please select a ZIP file to upload', 'error', 'Upload Error');
-            return;
-        }
-        
-        const file = fileInput.files[0];
-        
-        // Validate file size (50MB max)
-        if (file.size > 50 * 1024 * 1024) {
-            showNotification('File size exceeds 50MB limit', 'error', 'File Size Error');
-            return;
-        }
-        
-        // Validate file type
-        if (file.type !== 'application/zip' && file.type !== 'application/x-zip-compressed' && !file.name.endsWith('.zip')) {
-            showNotification('Only ZIP files are allowed', 'error', 'Invalid File Type');
-            return;
+        if (currentUploadType === 'zip') {
+            // Handle ZIP file upload
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showNotification('Please select a ZIP file to upload', 'error', 'Upload Error');
+                return;
+            }
+            
+            fileToUpload = fileInput.files[0];
+            
+            // Validate file size (50MB max)
+            if (fileToUpload.size > 50 * 1024 * 1024) {
+                showNotification('File size exceeds 50MB limit', 'error', 'File Size Error');
+                return;
+            }
+            
+            // Validate file type
+            if (fileToUpload.type !== 'application/zip' && fileToUpload.type !== 'application/x-zip-compressed' && !fileToUpload.name.endsWith('.zip')) {
+                showNotification('Only ZIP files are allowed', 'error', 'Invalid File Type');
+                return;
+            }
+            
+        } else {
+            // Handle folder upload - compress client-side first
+            if (!folderInput.files || folderInput.files.length === 0) {
+                showNotification('Please select a folder to upload', 'error', 'Upload Error');
+                return;
+            }
+            
+            // Show loading state for compression
+            setButtonLoading(uploadBtn, true);
+            uploadBtn.querySelector('.btn-loading').textContent = 'Compressing folder...';
+            
+            try {
+                fileToUpload = await compressFolderToZip(folderInput.files, projectName);
+            } catch (error) {
+                console.error('Compression error:', error);
+                showNotification('Folder compression failed: ' + error.message, 'error', 'Compression Error');
+                setButtonLoading(uploadBtn, false);
+                return;
+            }
+            
+            // Update loading state for upload
+            uploadBtn.querySelector('.btn-loading').textContent = 'Uploading...';
         }
         
         // Show loading state
@@ -125,7 +207,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Create FormData
         const formData = new FormData();
-        formData.append('project', file);
+        formData.append('project', fileToUpload);
         
         try {
             // Upload file
@@ -155,6 +237,81 @@ document.addEventListener('DOMContentLoaded', function() {
             setButtonLoading(uploadBtn, false);
         }
     });
+    
+    // Compress folder to ZIP using JSZip
+    async function compressFolderToZip(files, projectName) {
+        return new Promise((resolve, reject) => {
+            const zip = new JSZip();
+            
+            // Process all files and add to zip
+            let processedCount = 0;
+            const totalFiles = files.length;
+            
+            // Show compression progress in notification
+            showNotification(`Compressing ${totalFiles} files...`, 'warning', 'Compressing Folder');
+            
+            Array.from(files).forEach(file => {
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    try {
+                        // Get the relative path from the file's webkitRelativePath
+                        const relativePath = file.webkitRelativePath;
+                        
+                        // Add file to zip with its relative path
+                        zip.file(relativePath, e.target.result);
+                        
+                        processedCount++;
+                        
+                        // Update progress
+                        if (processedCount % 10 === 0 || processedCount === totalFiles) {
+                            const progress = Math.round((processedCount / totalFiles) * 100);
+                            // Could update progress UI here if needed
+                        }
+                        
+                        // When all files are processed, generate the zip
+                        if (processedCount === totalFiles) {
+                            zip.generateAsync({ type: 'blob' })
+                                .then(function(content) {
+                                    // Dismiss compression notification
+                                    const notifications = document.querySelectorAll('.notification');
+                                    notifications.forEach(notif => {
+                                        if (notif.querySelector('.notification-title')?.textContent === 'Compressing Folder') {
+                                            const closeBtn = notif.querySelector('.notification-close');
+                                            if (closeBtn) window.dismissNotification(closeBtn);
+                                        }
+                                    });
+                                    
+                                    // Create a File object from the blob
+                                    const zipFile = new File([content], `${projectName}.zip`, {
+                                        type: 'application/zip'
+                                    });
+                                    
+                                    // Validate size
+                                    if (zipFile.size > 50 * 1024 * 1024) {
+                                        reject(new Error('Compressed folder exceeds 50MB limit'));
+                                        return;
+                                    }
+                                    
+                                    resolve(zipFile);
+                                })
+                                .catch(function(error) {
+                                    reject(new Error('ZIP generation failed: ' + error.message));
+                                });
+                        }
+                    } catch (error) {
+                        reject(new Error('Failed to process file: ' + file.name));
+                    }
+                };
+                
+                reader.onerror = function() {
+                    reject(new Error('Failed to read file: ' + file.name));
+                };
+                
+                reader.readAsArrayBuffer(file);
+            });
+        });
+    }
     
     // Scan Function
     async function startScan(extractPath, zipPath, projectName) {
@@ -352,8 +509,17 @@ document.addEventListener('DOMContentLoaded', function() {
         uploadForm.reset();
         selectedFileDisplay.textContent = '';
         selectedFileDisplay.classList.remove('visible');
+        selectedFolderDisplay.textContent = '';
+        selectedFolderDisplay.classList.remove('visible');
         currentScanData = null;
         uploadedProjectData = null;
+        currentUploadType = 'zip';
+        
+        // Reset upload type display
+        zipUploadGroup.style.display = 'block';
+        folderUploadGroup.style.display = 'none';
+        fileInput.required = true;
+        folderInput.required = false;
         
         // Also trigger cleanup of old files via the backend
         fetch('cleanup.php', {
